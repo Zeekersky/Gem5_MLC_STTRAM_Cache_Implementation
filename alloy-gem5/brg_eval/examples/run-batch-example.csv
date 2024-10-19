@@ -1,0 +1,5 @@
+experiment,gem5-bin,num-cpus,cpu-model,binary-path,binary,index,bin-args,ruby,topology,l1i-size,l1d-size,l2-size,link-latency
+config1,build/RISCV/gem5.opt,1,TimingSimpleCPU,tests/test-progs/hello/bin/riscv/linux,hello,,hello,yes,MeshDirCorners_XY,32kB,64kB,256kB,2
+,,1,,,,1,,,,,,,
+config2,,4,,,,,,,,,,,
+,,8,,,,,,,,,,,

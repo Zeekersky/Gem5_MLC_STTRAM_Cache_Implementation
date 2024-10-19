@@ -1,0 +1,7 @@
+protocol "HETERO_SC3_WT";
+include "RubySlicc_interfaces.slicc";
+include "HETERO_SC3-msg.sm";
+include "HETERO_SC3_WT-SC3cache.sm";
+include "HETERO_SC3-L1cache.sm";
+include "HETERO_SC3-L2cache.sm";
+include "HETERO_SC3-dir.sm";

@@ -1,0 +1,6 @@
+protocol "SC3_Two_Level";
+include "RubySlicc_interfaces.slicc";
+include "HETERO_SC3-msg.sm";
+include "HETERO_SC3-SC3cache.sm";
+include "HETERO_SC3-L2cache.sm";
+include "HETERO_SC3-dir.sm";

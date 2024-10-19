@@ -1,0 +1,8 @@
+Import('*')
+
+Source('arbiter.cc')
+Source('ActiveMsgPacket.cc')
+
+SimObject('CacheAllocator.py')
+DebugFlag('CacheAllocator')
+Source('cache_allocator.cc')

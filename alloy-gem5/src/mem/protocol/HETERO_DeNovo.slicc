@@ -1,0 +1,9 @@
+protocol "HETERO_DeNovo";
+include "RubySlicc_interfaces.slicc";
+include "HETERO_DeNovo-msg.sm";
+include "HETERO_DeNovo-DeNovoCache.sm";
+include "HETERO_DeNovo-L1cache.sm";
+include "HETERO_DeNovo-L2cache.sm";
+include "HETERO_DeNovo-dir.sm";
+
+

@@ -1,0 +1,8 @@
+# -*- mode:python -*-
+
+Import('*')
+
+SimObject('TestScratchpadHarness.py')
+
+Source('test_scratchpad_suite.cc')
+Source('test_scratchpad_harness.cc')

@@ -1,0 +1,1129 @@
+/*
+ * Copyright (c) 2009-2012 Mark D. Hill and David A. Wood
+ * Copyright (c) 2010-2012 Advanced Micro Devices, Inc.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met: redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer;
+ * redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution;
+ * neither the name of the copyright holders nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+machine(MachineType:SC3, "Software-Centric Cache")
+    : SC3L2Sequencer* sequencer;
+
+      CacheMemory*    L1Icache;
+      CacheMemory*    L1Dcache;
+
+      int             l2_select_num_bits;
+      Cycles          cache_response_latency := 2;
+      Cycles          issue_latency          := 2;
+      bool            send_evictions;
+
+      // Request from cache to network/memory
+      MessageBuffer* requestFromCache, network="To", virtual_network="0",
+            vnet_type="request";
+
+      // Response from network/memory to cache
+      MessageBuffer* responseToCache, network="From", virtual_network="1",
+            vnet_type="response";
+
+      // CPU side
+      MessageBuffer* mandatoryQueue;
+{
+  // STATES
+  state_declaration(State, desc="Cache states") {
+
+    // Stable
+    I,   AccessPermission:Invalid,    desc="Not Present/Invalid";
+    P,   AccessPermission:Incomplete, desc="Partially dirty";
+    M,   AccessPermission:Read_Write, desc="Modified";
+    C,   AccessPermission:Read_Only,  desc="Clean";
+
+    // Transient for replacement/atomic
+    MI,  AccessPermission:Read_Only,  desc="Modified, issued PUT";
+    MA,  AccessPermission:Read_Only,  desc="Atomic, writing-back current line";
+    IA,  AccessPermission:Busy,       desc="Waiting for atomic response";
+
+    // Transient for LD/Store
+    IS,  AccessPermission:Busy,       desc="Issued request for LOAD/IFETCH";
+    IMR, AccessPermission:Busy,       desc="...";
+    IMW, AccessPermission:Busy,       desc="...";
+
+    // Transient for invalidate/flush (writeback)
+    PI,  AccessPermission:Incomplete, desc="Written back, waiting for ack";
+    MC,  AccessPermission:Read_Only,  desc="Written back, waiting for ack";
+  }
+
+  // EVENTS
+  enumeration(Event, desc="Cache events") {
+    // From processor
+
+    Load,             desc="Load request from processor";
+    Ifetch,           desc="Ifetch request from processor";
+    Store,            desc="Store request from processor";
+    Atomic,           desc="Atomic memory op";
+    Flush,            desc="Flush dirty line request";
+    Inv,              desc="Invalidate clean line request";
+
+    // moyang TC3-TBIW: events for TBIW
+
+    FlushX,           desc="Flush but level not met";
+    InvX,             desc="Invalidate but level not met";
+    InvX1,            desc="Invalidate M state but it's writeMask is full";
+
+    // From network
+
+    Data,             desc="Data from network";
+    AtomicResp,       desc="Response to forwarded atomic packet from dir/memory";
+    Writeback_Ack,    desc="Ack from the directory for a writeback";
+
+    // Internal events
+
+    Replacement,      desc="Replace a block";
+  }
+
+  // STRUCTURE DEFINITIONS
+  // CacheEntry
+  structure(Entry, desc="...", interface="AbstractCacheEntry") {
+    State     CacheState,    desc="cache state";
+    bool      Dirty,         desc="Is the data dirty (different than memory)?";
+    DataBlock DataBlk,       desc="Data in the block";
+    WriteMask writeMask,     desc="Byte written mask";
+    WriteMask TouchBits,     desc="Touch bits for clean data";
+    int       ContextID,     desc="";
+  }
+
+  // TBE fields
+  structure(TBE, desc="...") {
+    State                TBEState,      desc="Transient state";
+    DataBlock            DataBlk,       desc="data for the block, required for concurrent writebacks";
+    WriteMask            writeMask,     desc="Byte written mask";
+    // For AMOs to be handled in L2
+    DataBlock            WTData,        desc="Data-block to be write-through to L2";
+    CoherenceRequestType AtomicType,    desc="Atomic equest type";
+    int                  ContextID,     desc="";
+  }
+
+  structure(TBETable, external="yes") {
+    TBE  lookup(Addr);
+    void allocate(Addr);
+    void deallocate(Addr);
+    bool isPresent(Addr);
+  }
+
+  // STRUCTURES
+  // TODO: assume unlimited size of TBE for flush all for now
+  TBETable TBEs, template="<SC3_TBE>", constructor="0";
+
+  // PROTOTYPES
+  Tick clockEdge();
+  Cycles ticksToCycles(Tick t);
+  void set_cache_entry(AbstractCacheEntry a);
+  void unset_cache_entry();
+  void set_tbe(TBE b);
+  void unset_tbe();
+  void profileMsgDelay(int virtualNetworkType, Cycles b);
+
+  int l2_select_low_bit, default="RubySystem::getBlockSizeBits()";
+
+  Entry getCacheEntry(Addr addr), return_by_pointer="yes" {
+    Entry L1Dcache_entry := static_cast(Entry, "pointer", L1Dcache[addr]);
+    if(is_valid(L1Dcache_entry)) {
+      return L1Dcache_entry;
+    }
+    Entry L1Icache_entry := static_cast(Entry, "pointer", L1Icache[addr]);
+    return L1Icache_entry;
+  }
+
+  Entry getL1DCacheEntry(Addr addr), return_by_pointer="yes" {
+    Entry L1Dcache_entry := static_cast(Entry, "pointer", L1Dcache[addr]);
+    return L1Dcache_entry;
+  }
+
+  Entry getL1ICacheEntry(Addr addr), return_by_pointer="yes" {
+    Entry L1Icache_entry := static_cast(Entry, "pointer", L1Icache[addr]);
+    return L1Icache_entry;
+  }
+
+  //----------------------------------------------------------------------
+  // FUNCTIONS
+  //----------------------------------------------------------------------
+
+  Event mandatory_request_type_to_event(RubyRequestType stype, RubyRequestType ptype) {
+   if (stype == RubyRequestType:LD) {
+      return Event:Load;
+    } else if (stype == RubyRequestType:IFETCH) {
+      return Event:Ifetch;
+    } else if ((stype == RubyRequestType:ST)) {
+      return Event:Store;
+    } else if ((stype == RubyRequestType:ATOMIC_RETURN) ||
+               (stype == RubyRequestType:ATOMIC)) {
+      return Event:Atomic;
+    } else {
+      error("Invalid RubyRequestType");
+    }
+  }
+
+  State getState(TBE tbe, Entry cache_entry, Addr addr) {
+    if (is_valid(tbe)) {
+      return tbe.TBEState;
+    }
+    else if (is_valid(cache_entry)) {
+      return cache_entry.CacheState;
+    }
+    else {
+      return State:I;
+    }
+  }
+
+  void setState(TBE tbe, Entry cache_entry, Addr addr, State state) {
+    if (is_valid(tbe)) {
+      tbe.TBEState := state;
+    }
+
+    if (is_valid(cache_entry)) {
+      cache_entry.CacheState := state;
+    }
+  }
+
+  AccessPermission getAccessPermission(Addr addr) {
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+      return SC3_State_to_permission(tbe.TBEState);
+    }
+
+    Entry cache_entry := getCacheEntry(addr);
+    if(is_valid(cache_entry)) {
+      return SC3_State_to_permission(cache_entry.CacheState);
+    }
+
+    return AccessPermission:NotPresent;
+  }
+
+  void setAccessPermission(Entry cache_entry, Addr addr, State state) {
+    if (is_valid(cache_entry)) {
+      cache_entry.changePermission(SC3_State_to_permission(state));
+    }
+  }
+
+  bool functionalRead(Addr addr, Packet *pkt) {
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+      return testAndRead(addr, tbe.DataBlk, pkt);
+    } else {
+      return testAndRead(addr, getCacheEntry(addr).DataBlk, pkt);
+    }
+  }
+
+  int functionalWrite(Addr addr, Packet *pkt) {
+    int num_functional_writes := 0;
+
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+      num_functional_writes := num_functional_writes +
+        testAndWrite(addr, tbe.DataBlk, pkt);
+      return num_functional_writes;
+    }
+
+    num_functional_writes := num_functional_writes +
+        testAndWrite(addr, getCacheEntry(addr).DataBlk, pkt);
+    return num_functional_writes;
+  }
+
+  AbstractCacheEntry getAbstractCacheEntry(Addr address), return_by_pointer="yes" {
+     return L1Dcache.lookup(address);
+  }
+
+  CacheMemory getICacheMemory(), return_by_pointer="yes" {
+     return L1Icache.getPtr();
+  }
+
+  CacheMemory getDCacheMemory(), return_by_pointer="yes" {
+     return L1Dcache.getPtr();
+  }
+
+  //----------------------------------------------------------------------
+  // Network Ports
+  //----------------------------------------------------------------------
+
+  // Output Request Port
+  out_port(requestNetwork_out, RequestMsg, requestFromCache);
+
+  // Input Response Port
+  in_port(responseNetwork_in, ResponseMsg, responseToCache) {
+    if (responseNetwork_in.isReady(clockEdge())) {
+      peek(responseNetwork_in, ResponseMsg, block_on="addr") {
+
+        Entry cache_entry := getCacheEntry(in_msg.addr);
+        TBE tbe := TBEs[in_msg.addr];
+
+        if (in_msg.Type == CoherenceResponseType:DATA) {
+          trigger(Event:Data, in_msg.addr, cache_entry, tbe);
+        }
+        else if (in_msg.Type == CoherenceResponseType:ATOMIC_RESP ||
+                 in_msg.Type == CoherenceResponseType:SC_SUCCESS ||
+                 in_msg.Type == CoherenceResponseType:SC_FAILED) {
+          trigger(Event:AtomicResp, in_msg.addr, cache_entry, tbe);
+        }
+        else if (in_msg.Type == CoherenceResponseType:WB_ACK) {
+          trigger(Event:Writeback_Ack, in_msg.addr, cache_entry, tbe);
+        }
+        else {
+          error("Unexpected message");
+        }
+      }
+    }
+  }
+
+  // Mandatory Queue
+  in_port(mandatoryQueue_in, RubyRequest, mandatoryQueue, desc="...") {
+    if (mandatoryQueue_in.isReady(clockEdge())) {
+      peek(mandatoryQueue_in, RubyRequest, block_on="LineAddress") {
+        TBE tbe := TBEs[in_msg.LineAddress];
+        Addr addr := in_msg.LineAddress;
+
+        // write-back (flush) and invalidation
+        if (in_msg.Type == RubyRequestType:FLUSH) {
+           Entry L1Dcache_entry := getL1DCacheEntry(addr);
+           if (is_valid(L1Dcache_entry)) {
+             if (L1Dcache_entry.getCacheLevel() < 0) {
+               // moyang TC3-TBIW: if level < 0, unconditionally flush
+               trigger(Event:Flush, addr, L1Dcache_entry, tbe);
+             } else {
+               if (in_msg.inv_wb_type == 1) {
+                 // moyang TC3-TBIW: only flush when level <= given level
+                 if (L1Dcache_entry.getCacheLevel() <= in_msg.inv_wb_level) {
+                   trigger(Event:Flush, addr, L1Dcache_entry, tbe);
+                 } else {
+                   trigger(Event:FlushX, addr, L1Dcache_entry, tbe);
+                 }
+               }
+               else if (in_msg.inv_wb_type == 2) {
+                 // moyang TC3-TBIW: only flush when level >= given level
+                 if (L1Dcache_entry.getCacheLevel() >= in_msg.inv_wb_level) {
+                   trigger(Event:Flush, addr, L1Dcache_entry, tbe);
+                 } else {
+                   trigger(Event:FlushX, addr, L1Dcache_entry, tbe);
+                 }
+               }
+               else if (in_msg.inv_wb_type == 0) {
+                 // moyang TC3-TBIW: always flush
+                 trigger(Event:Flush, addr, L1Dcache_entry, tbe);
+               }
+               else {
+                 error("Unknown inv_wb_type");
+               }
+             }
+           }
+           else {
+             trigger(Event:Flush, addr, L1Dcache_entry, tbe);
+           }
+        } else if (in_msg.Type == RubyRequestType:INVALIDATE) {
+           Entry L1Dcache_entry := getL1DCacheEntry(addr);
+
+           if (is_valid(L1Dcache_entry)) {
+             // All-dirty M state cache line, nothing to invalidate
+             if ((getState(tbe, L1Dcache_entry, addr) == State:M) &&
+                (L1Dcache_entry.writeMask.isFull())) {
+               trigger(Event:InvX1, addr, L1Dcache_entry, tbe);
+             }
+             else if (L1Dcache_entry.getCacheLevel() < 0) {
+               // moyang TC3-TBIW: if level == 0, unconditionally invalidate
+               trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+             }
+             else {
+               if (in_msg.inv_wb_type == 1) {
+                 if (!L1Dcache_entry.TouchBits.isFull()) {
+                   // moyang TC3-TBIW: if TouchBits is not full,
+                   // the level is ambiguous, the line must be
+                   // conservatively invalidated.
+                   trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+                 }
+                 else if (L1Dcache_entry.getCacheLevel() <= in_msg.inv_wb_level) {
+                   // moyang TC3-TBIW: only invalidate when level <= given level
+                   trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+                 } else {
+                   trigger(Event:InvX, addr, L1Dcache_entry, tbe);
+                 }
+               }
+               else if (in_msg.inv_wb_type == 2) {
+                 if (!L1Dcache_entry.TouchBits.isFull()) {
+                   // moyang TC3-TBIW: if TouchBits is not full,
+                   // the level is ambiguous, and the line must be
+                   // conservatively invalidated.
+                   trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+                 }
+                 if (L1Dcache_entry.getCacheLevel() >= in_msg.inv_wb_level) {
+                   // moyang TC3-TBIW: only invalidate when level >= given level
+                   trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+                 } else {
+                   trigger(Event:InvX, addr, L1Dcache_entry, tbe);
+                 }
+               }
+               else if (in_msg.inv_wb_type == 0) {
+                 // moyang TC3-TBIW: always invalidate
+                 trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+               } else {
+                 error("Unknown inv_wb_type");
+               }
+             }
+           }
+           else {
+             trigger(Event:Inv, addr, L1Dcache_entry, tbe);
+           }
+        }
+
+        // Regular requests from the processor
+        else if (in_msg.Type == RubyRequestType:IFETCH) {
+
+          // Check for data access to blocks in I-cache and ifetchs
+          // to blocks in D-cache
+
+          // ** INSTRUCTION ACCESS ***
+
+          Entry L1Icache_entry := getL1ICacheEntry(addr);
+          if (is_valid(L1Icache_entry)) {
+            // already in L1I
+            trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.PrimaryType),
+                    addr, L1Icache_entry, tbe);
+          } else {
+            // check to see if it is in the OTHER L1
+            Entry L1Dcache_entry := getL1DCacheEntry(addr);
+            if (is_valid(L1Dcache_entry)) {
+              // The block is in the wrong L1
+              trigger(Event:Replacement, addr, L1Dcache_entry, tbe);
+            }
+
+            if (L1Icache.cacheAvail(addr)) {
+              // L1I does't have the line, but we have space for it
+              trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.PrimaryType),
+                      addr, L1Icache_entry, tbe);
+            } else {
+              // No room in the L1I, so we need to make room in the L1I
+              Addr victim_addr := L1Icache.cacheProbe(addr);
+              Entry victim_entry := getL1ICacheEntry(victim_addr);
+              TBE victim_tbe := TBEs[victim_addr];
+              trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
+            }
+          }
+        } else {
+          // *** DATA ACCESS ***
+
+          Entry L1Dcache_entry := getL1DCacheEntry(addr);
+
+          if (is_valid(L1Dcache_entry)) {
+            // already in L1D
+            trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.PrimaryType),
+                    addr, L1Dcache_entry, tbe);
+          } else {
+            // Check to see if it is in the OTHER L1
+            Entry L1Icache_entry := getL1ICacheEntry(addr);
+            if (is_valid(L1Icache_entry)) {
+              trigger(Event:Replacement, addr, L1Icache_entry, tbe);
+            }
+
+            if (L1Dcache.cacheAvail(addr)) {
+              // L1D does't have the line, but we have space for it
+              trigger(mandatory_request_type_to_event(in_msg.Type, in_msg.PrimaryType),
+                      addr, L1Dcache_entry, tbe);
+            } else {
+              // No room in the L1D so we need to make room in the L1D
+              Addr victim_addr := L1Dcache.cacheProbe(addr);
+              Entry victim_entry := getL1DCacheEntry(victim_addr);
+              TBE victim_tbe := TBEs[victim_addr];
+              trigger(Event:Replacement, victim_addr, victim_entry, victim_tbe);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  //----------------------------------------------------------------------
+  // ACTIONS
+  //----------------------------------------------------------------------
+
+  action(a_issueRequest, "a", desc="Issue a GET request") {
+    enqueue(requestNetwork_out, RequestMsg, issue_latency) {
+      assert(is_valid(cache_entry));
+      out_msg.addr        := address;
+      out_msg.Type        := CoherenceRequestType:GETV;
+      out_msg.Requestor   := machineID;
+      out_msg.MessageSize := MessageSizeType:Control;
+      out_msg.ContextID   := cache_entry.ContextID;
+      out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                              l2_select_low_bit, l2_select_num_bits, intToID(0)));
+    }
+  }
+
+  action(b_issuePUT, "b", desc="Issue a PUT request") {
+    enqueue(requestNetwork_out, RequestMsg, issue_latency) {
+      assert(is_valid(cache_entry));
+      out_msg.addr        := address;
+      out_msg.Type        := CoherenceRequestType:PUTV;
+      out_msg.Requestor   := machineID;
+      out_msg.DataBlk     := cache_entry.DataBlk;
+      out_msg.MessageSize := MessageSizeType:Data;
+      out_msg.ContextID   := cache_entry.ContextID;
+      out_msg.writeMask.clear();
+      out_msg.writeMask.orMask(cache_entry.writeMask);
+      out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                              l2_select_low_bit, l2_select_num_bits, intToID(0)));
+    }
+  }
+
+  action(ia_issueAtomic, "ia", desc="Issue AMO to L2") {
+    enqueue(requestNetwork_out, RequestMsg, issue_latency) {
+      assert(is_valid(tbe));
+      out_msg.addr        := address;
+      out_msg.Type        := tbe.AtomicType;
+      out_msg.Requestor   := machineID;
+      out_msg.DataBlk     := tbe.WTData;
+      out_msg.ContextID   := tbe.ContextID;
+      out_msg.MessageSize := MessageSizeType:Data;
+      out_msg.writeMask.clear();
+      out_msg.writeMask.orMask(tbe.writeMask);
+      out_msg.Destination.add(mapAddressToRange(address, MachineType:L2Cache,
+                              l2_select_low_bit, l2_select_num_bits, intToID(0)));
+    }
+  }
+
+  action(storeAtomicToTBE, "sa", desc="Store Atomic to TBE") {
+    peek(mandatoryQueue_in, RubyRequest){
+      assert(is_valid(tbe));
+      tbe.writeMask.clear();
+      tbe.writeMask := in_msg.writeMask;
+      tbe.WTData    := in_msg.WTData;
+      tbe.ContextID := in_msg.contextId;
+      APPEND_TRANSITION_COMMENT("ContextID = ");
+      APPEND_TRANSITION_COMMENT(tbe.ContextID);
+      if (in_msg.PrimaryType == RubyRequestType:Load_Linked) {
+        tbe.AtomicType := CoherenceRequestType:LL;
+      } else if (in_msg.PrimaryType == RubyRequestType:Store_Conditional) {
+        tbe.AtomicType := CoherenceRequestType:SC;
+      } else {
+        tbe.AtomicType := CoherenceRequestType:ATOMIC;
+      }
+    }
+  }
+
+  action(i_allocateL1ICacheBlock, "ii", desc="Allocate a L1I cache block") {
+    assert(is_invalid(cache_entry));
+    assert(L1Icache.cacheAvail(address));
+    set_cache_entry(L1Icache.allocate(address, new Entry));
+    cache_entry.writeMask.clear();
+    cache_entry.setCacheLevel(-2); // moyang TC3-TBIW: uninitialized level
+  }
+
+  action(i_allocateL1DCacheBlock, "id", desc="Allocate a L1D cache block") {
+    assert(is_invalid(cache_entry));
+    assert(L1Dcache.cacheAvail(address));
+    set_cache_entry(L1Dcache.allocate(address, new Entry));
+    cache_entry.writeMask.clear();
+    cache_entry.setCacheLevel(-2); // moyang TC3-TBIW: uninitialized level
+  }
+
+  action(h_deallocateL1CacheBlock, "h", desc="deallocate a cache block") {
+    assert(is_valid(cache_entry));
+    if (L1Dcache.isTagPresent(address)) {
+      L1Dcache.deallocate(address);
+    } else {
+      L1Icache.deallocate(address);
+    }
+    unset_cache_entry();
+  }
+
+  action(m_popMandatoryQueue, "m", desc="Pop the mandatory request queue") {
+    mandatoryQueue_in.dequeue(clockEdge());
+  }
+
+  action(n_popResponseQueue, "n", desc="Pop the response queue") {
+    Tick delay := responseNetwork_in.dequeue(clockEdge());
+    profileMsgDelay(1, ticksToCycles(delay));
+  }
+
+  action(p_profileIMiss, "pii", desc="Profile Icache miss") {
+      ++L1Icache.demand_misses;
+  }
+
+  action(p_profileDMiss, "pid", desc="Profile Dcache miss") {
+      ++L1Dcache.demand_misses;
+  }
+
+  action(p_profileIHit, "phi", desc="Profile Icache hit") {
+      ++L1Icache.demand_hits;
+  }
+
+  action(p_profileDHit, "phD", desc="Profile IDache hit") {
+      ++L1Dcache.demand_hits;
+  }
+
+  action(p_profileDInv, "pinv", desc="Profile Dcache self-invalidation") {
+      peek(mandatoryQueue_in, RubyRequest) {
+        ++L1Dcache.self_invalidations;
+        L1Dcache.increase_self_invalidation_bytes(L1Dcache.getBlockSize());
+
+        if (is_valid(cache_entry)) {
+          // moyang TC3-TBIW:
+          APPEND_TRANSITION_COMMENT(" Line Level = ");
+          APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+          APPEND_TRANSITION_COMMENT(" Inv/WB type = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_type);
+          APPEND_TRANSITION_COMMENT(" Inv/WB level = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_level);
+        }
+      }
+  }
+
+  action(p_profileDWB, "pwb", desc="Profile Dcache self-writeback") {
+      peek(mandatoryQueue_in, RubyRequest) {
+        ++L1Dcache.self_writebacks;
+        L1Dcache.increase_self_writeback_bytes(L1Dcache.getBlockSize());
+
+        if (is_valid(cache_entry)) {
+          // moyang TC3-TBIW:
+          APPEND_TRANSITION_COMMENT(" Line Level = ");
+          APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+          APPEND_TRANSITION_COMMENT(" Inv/WB type = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_type);
+          APPEND_TRANSITION_COMMENT(" Inv/WB level = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_level);
+        }
+      }
+  }
+
+  action(p_profileDInvX, "pinvx", desc="Profile Dcache self-invalidation level not met") {
+      peek(mandatoryQueue_in, RubyRequest) {
+        // moyang TC3-TBIW:
+        ++L1Dcache.self_invalidations_saved;
+        if (is_valid(cache_entry)) {
+          APPEND_TRANSITION_COMMENT(" Line Level = ");
+          APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+          APPEND_TRANSITION_COMMENT(" Inv/WB type = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_type);
+          APPEND_TRANSITION_COMMENT(" Inv/WB level = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_level);
+        }
+      }
+  }
+
+  action(p_profileDWBX, "pwbx", desc="Profile Dcache self-writeback level not met") {
+      peek(mandatoryQueue_in, RubyRequest) {
+        // moyang TC3-TBIW:
+        ++L1Dcache.self_writebacks_saved;
+        if (is_valid(cache_entry)) {
+          APPEND_TRANSITION_COMMENT(" Line Level = ");
+          APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+          APPEND_TRANSITION_COMMENT(" Inv/WB type = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_type);
+          APPEND_TRANSITION_COMMENT(" Inv/WB level = ");
+          APPEND_TRANSITION_COMMENT(in_msg.inv_wb_level);
+        }
+      }
+  }
+
+  action(r_load_hit, "r", desc="Notify sequencer the load completed.") {
+    assert(is_valid(cache_entry));
+    DPRINTF(RubySlicc,"r_load_hit, address = 0x%x, data = %s\n", address, cache_entry.DataBlk);
+    // one of two caches will setMRU correctly
+    L1Icache.setMRU(address);
+    L1Dcache.setMRU(address);
+
+    // moyang TC3-TBIW: update cache level
+    // cache level is NOT changed for load hit
+
+    int cache_level := -1;
+    int old_cache_level := cache_entry.getCacheLevel();
+    sequencer.readCallback(address, cache_entry.DataBlk, cache_level, false);
+    assert(cache_level >= 0);
+
+    APPEND_TRANSITION_COMMENT(" Old Level = ");
+    APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+    APPEND_TRANSITION_COMMENT(" Req Level = ");
+    APPEND_TRANSITION_COMMENT(cache_level);
+    APPEND_TRANSITION_COMMENT(" New Level = ");
+    APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+
+    DPRINTF(RubySlicc,"r_load_hit, address = 0x%x, data = %s, old_level = %d, level = %d\n",
+            address, cache_entry.DataBlk, old_cache_level, cache_level);
+  }
+
+  action(update_touch_bits, "utb", desc="Update touch bits") {
+    peek(mandatoryQueue_in, RubyRequest) {
+      cache_entry.TouchBits.orMask(in_msg.writeMask);
+    }
+  }
+
+  action(rx_load_hit, "rx", desc="External load completed.") {
+    peek(responseNetwork_in, ResponseMsg) {
+      assert(is_valid(cache_entry));
+      DPRINTF(RubySlicc,"rx_load_hit, address = 0x%x, data = %s\n", address, cache_entry.DataBlk);
+
+      // moyang TC3-TBIW: update cache level
+
+      int cache_level := -1;
+      int old_cache_level := cache_entry.getCacheLevel();
+      sequencer.readCallback(address, cache_entry.DataBlk, cache_level, true,
+                             machineIDToMachineType(in_msg.Sender));
+      assert(cache_level >= 0);
+      APPEND_TRANSITION_COMMENT(" Old Level = ");
+      APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+      APPEND_TRANSITION_COMMENT(" Req Level = ");
+      APPEND_TRANSITION_COMMENT(cache_level);
+
+      if (old_cache_level == -2) {
+        // previous invalid
+        cache_entry.setCacheLevel(cache_level);
+      }
+      else {
+        if (cache_level< old_cache_level) {
+          cache_entry.setCacheLevel(cache_level);
+        }
+      }
+
+      APPEND_TRANSITION_COMMENT(" New Level = ");
+      APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+
+      // one of two caches will setMRU correctly
+      L1Icache.setMRU(address);
+      L1Dcache.setMRU(address);
+      DPRINTF(RubySlicc,
+              "rx_load_hit, address = 0x%x, data = %s, old_level = %d, level = %d\n",
+              address, cache_entry.DataBlk, old_cache_level, cache_level);
+    }
+  }
+
+  action(s_store_hit_m, "sm", desc="Notify sequencer that store completed.") {
+    assert(is_valid(cache_entry));
+    L1Dcache.setMRU(cache_entry);
+
+    // moyang TC3-TBIW: update cache level
+
+    int cache_level := -1;
+    int old_cache_level := cache_entry.getCacheLevel();
+    sequencer.writeCallback(address, cache_entry.DataBlk, cache_level, false);
+    assert(cache_level >= 0);
+
+    APPEND_TRANSITION_COMMENT(" Old Level = ");
+    APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+    APPEND_TRANSITION_COMMENT(" Req Level = ");
+    APPEND_TRANSITION_COMMENT(cache_level);
+
+    if (old_cache_level != cache_level) {
+      cache_entry.setCacheLevel(-1);
+    }
+    APPEND_TRANSITION_COMMENT(" New Level = ");
+    APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+
+    DPRINTF(RubySlicc,"s_store_hit_m, address = 0x%x, data = %s, old_level = %d, level = %d\n",
+            address, cache_entry.DataBlk, old_cache_level, cache_level);
+  }
+
+  action(s_store_hit_cm, "scm", desc="Notify sequencer that store completed.") {
+    assert(is_valid(cache_entry));
+    L1Dcache.setMRU(cache_entry);
+
+    // moyang TC3-TBIW: update cache level
+
+    int cache_level := -1;
+    int old_cache_level := cache_entry.getCacheLevel();
+    sequencer.writeCallback(address, cache_entry.DataBlk,
+                            cache_level, false);
+
+    assert(cache_level >= 0);
+    APPEND_TRANSITION_COMMENT(" Old Level = ");
+    APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+    APPEND_TRANSITION_COMMENT(" Req Level = ");
+    APPEND_TRANSITION_COMMENT(cache_level);
+
+    if (old_cache_level != cache_level) {
+      cache_entry.setCacheLevel(-1);
+    }
+
+    APPEND_TRANSITION_COMMENT(" New Level = ");
+    APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+
+    DPRINTF(RubySlicc,
+            "s_store_hit_cm, address = 0x%x, data = %s, old_level = %d, level = %d\n",
+            address, cache_entry.DataBlk, old_cache_level, cache_level);
+  }
+
+  action(sx_store_hit, "sx", desc="External store completed.") {
+    peek(responseNetwork_in, ResponseMsg) {
+      assert(is_valid(cache_entry));
+      L1Dcache.setMRU(cache_entry);
+
+      // moyang TC3-TBIW: update cache level
+
+      int cache_level := -1;
+      int old_cache_level := cache_entry.getCacheLevel();
+
+      sequencer.writeCallback(address, cache_entry.DataBlk, cache_level, true,
+                              machineIDToMachineType(in_msg.Sender));
+      assert(cache_level >= 0);
+
+      APPEND_TRANSITION_COMMENT(" Old Level = ");
+      APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+      APPEND_TRANSITION_COMMENT(" Req Level = ");
+      APPEND_TRANSITION_COMMENT(cache_level);
+
+      if (old_cache_level == -2) {
+        // previously invalid
+        cache_entry.setCacheLevel(cache_level);
+      }
+      else {
+        if (old_cache_level != cache_level) {
+          cache_entry.setCacheLevel(-1);
+        }
+      }
+
+      APPEND_TRANSITION_COMMENT(" New Level = ");
+      APPEND_TRANSITION_COMMENT(cache_entry.getCacheLevel());
+
+      DPRINTF(RubySlicc,"sx_store_hit, address = 0x%x, data = %s, old_level = %d, level = %d\n",
+              address, cache_entry.DataBlk, old_cache_level, cache_level);
+    }
+  }
+
+  action(dw_dirty_write, "dw", desc="Write to dirty line") {
+    peek(mandatoryQueue_in, RubyRequest) {
+      cache_entry.writeMask.orMask(in_msg.writeMask);
+      cache_entry.TouchBits.orMask(in_msg.writeMask);
+    }
+  }
+
+  action(ad_amo_done, "ad", desc="AMO Packet response completed.") {
+    peek(responseNetwork_in, ResponseMsg) {
+      DPRINTF(RubySlicc,"Response to AMO packet %s received\n", address);
+      DataBlock tmp := in_msg.DataBlk;
+      bool sc_success := true;
+      if (in_msg.Type == CoherenceResponseType:SC_FAILED) {
+        sc_success := false;
+      }
+      sequencer.atomicCallback(address, tmp, sc_success,
+                               machineIDToMachineType(in_msg.Sender));
+    }
+  }
+
+  action(ad_invalidate_done, "invd", desc="Invalidate done") {
+    sequencer.invalidateCallback(address);
+  }
+
+  action(ad_writeback_done, "wbd", desc="Writeback done") {
+    sequencer.writebackCallback(address);
+  }
+
+  action(u_writeDataToCache, "u", desc="Write data to the cache") {
+    peek(responseNetwork_in, ResponseMsg) {
+      assert(is_valid(cache_entry));
+      DataBlock tmp := in_msg.DataBlk;
+      DPRINTF(RubySlicc,"writeDataToCache before: address = 0x%x, data = %s\n", address, tmp);
+      tmp.copyPartial(cache_entry.DataBlk, cache_entry.writeMask);
+      DPRINTF(RubySlicc,"writeDataToCache after: address = 0x%x, data = %s\n", address, tmp);
+      cache_entry.DataBlk := tmp;
+    }
+  }
+
+  action(forward_eviction_to_cpu, "\cc", desc="sends eviction information to the processor") {
+    if (send_evictions) {
+      DPRINTF(RubySlicc, "Sending invalidation for %#x to the CPU\n", address);
+      sequencer.evictionCallback(address);
+    }
+  }
+
+  action(v_allocateTBE, "v", desc="Allocate TBE") {
+    TBEs.allocate(address);
+    set_tbe(TBEs[address]);
+  }
+
+  action(w_deallocateTBE, "w", desc="Deallocate TBE") {
+    TBEs.deallocate(address);
+    unset_tbe();
+  }
+
+  action(x_copyDataFromCacheToTBE, "x", desc="Copy data from cache to TBE") {
+    assert(is_valid(cache_entry));
+    assert(is_valid(tbe));
+    tbe.DataBlk := cache_entry.DataBlk;
+  }
+
+  action(setContextID, "scid", desc="set contextID in TBE/entry") {
+    peek(mandatoryQueue_in, RubyRequest) {
+      if (is_valid(cache_entry)) {
+        cache_entry.ContextID := in_msg.contextId;
+      }
+    }
+  }
+
+  action(clearWriteMask, "cwm", desc="...") {
+    assert(is_valid(cache_entry));
+    cache_entry.writeMask.clear();
+  }
+
+  action(z_stall, "z", desc="stall") {
+    // do nothing
+  }
+
+  //----------------------------------------------------------------------
+  // Transitions
+  //----------------------------------------------------------------------
+
+  transition({IS, IMW, IMR, MI, MA, IA, PI, MC},
+             {Load, Ifetch, Store, Replacement, Atomic, Inv, Flush, InvX,
+              FlushX}) {
+    z_stall;
+  }
+
+  transition(M, Store) {
+    dw_dirty_write;
+    s_store_hit_m;
+    p_profileDHit;
+    m_popMandatoryQueue;
+  }
+
+  transition(P, Store, IMW) {
+    v_allocateTBE;
+    x_copyDataFromCacheToTBE;
+    dw_dirty_write;
+    p_profileDMiss;
+    a_issueRequest;
+    m_popMandatoryQueue;
+  }
+
+  transition({M, C}, Load) {
+    update_touch_bits;
+    r_load_hit;
+    p_profileDHit;
+    m_popMandatoryQueue;
+  }
+
+  transition({M, C}, Ifetch) {
+    r_load_hit;
+    p_profileIHit;
+    m_popMandatoryQueue;
+  }
+
+  transition(I, Store, IMW) {
+    v_allocateTBE;
+    i_allocateL1DCacheBlock;
+    setContextID;
+    dw_dirty_write;
+    p_profileDMiss;
+    a_issueRequest;
+    m_popMandatoryQueue;
+  }
+
+  transition(C, Store, M) {
+    dw_dirty_write;
+    s_store_hit_cm;
+    p_profileDHit;
+    m_popMandatoryQueue;
+  }
+
+  transition(I, Atomic, IA) {
+    v_allocateTBE;
+    storeAtomicToTBE;
+    ia_issueAtomic;
+    m_popMandatoryQueue;
+  }
+
+  transition(C, Atomic, IA) {
+    h_deallocateL1CacheBlock;
+    v_allocateTBE;
+    storeAtomicToTBE;
+    ia_issueAtomic;
+    m_popMandatoryQueue;
+  }
+
+  transition(I, Load, IS) {
+    v_allocateTBE;
+    i_allocateL1DCacheBlock;
+    setContextID;
+    update_touch_bits;
+    a_issueRequest;
+    p_profileDMiss;
+    m_popMandatoryQueue;
+  }
+
+  transition(I, Ifetch, IS) {
+    v_allocateTBE;
+    i_allocateL1ICacheBlock;
+    setContextID;
+    a_issueRequest;
+    p_profileIMiss;
+    m_popMandatoryQueue;
+  }
+
+  transition(P, Load, IMR) {
+    v_allocateTBE;
+    x_copyDataFromCacheToTBE;
+    update_touch_bits;
+    a_issueRequest;
+    p_profileDMiss;
+    m_popMandatoryQueue;
+  }
+
+  transition(P, Ifetch, IMR) {
+    v_allocateTBE;
+    x_copyDataFromCacheToTBE;
+    a_issueRequest;
+    p_profileIMiss;
+    m_popMandatoryQueue;
+  }
+
+  transition(IS, Data, C) {
+    u_writeDataToCache;
+    rx_load_hit;
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  transition(IMR, Data, M) {
+    u_writeDataToCache;
+    rx_load_hit;
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  transition(IMW, Data, M) {
+    u_writeDataToCache;
+    sx_store_hit;
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  transition({P, M}, Replacement, MI) {
+    v_allocateTBE;
+    b_issuePUT;
+    x_copyDataFromCacheToTBE;
+    forward_eviction_to_cpu;
+    clearWriteMask;
+    h_deallocateL1CacheBlock;
+  }
+
+  transition(C, Replacement, I) {
+     h_deallocateL1CacheBlock;
+  }
+
+  transition({P, M}, Atomic, MA) {
+     v_allocateTBE;
+     storeAtomicToTBE;
+     b_issuePUT;
+     x_copyDataFromCacheToTBE;
+     forward_eviction_to_cpu;
+     h_deallocateL1CacheBlock;
+     m_popMandatoryQueue;
+  }
+
+  transition(MA, Writeback_Ack, IA) {
+    n_popResponseQueue;
+    ia_issueAtomic;
+  }
+
+  transition(MI, Writeback_Ack, I) {
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  transition(IA, AtomicResp, I) {
+    ad_amo_done;
+    w_deallocateTBE;
+    n_popResponseQueue;
+  }
+
+  // transitions for write-back (flush) and invalidation
+
+  transition(P, Flush, PI) {
+    v_allocateTBE;
+    b_issuePUT;
+    x_copyDataFromCacheToTBE;
+    forward_eviction_to_cpu;
+    clearWriteMask;
+    h_deallocateL1CacheBlock;
+    p_profileDWB;
+    m_popMandatoryQueue;
+  }
+
+  transition(M, Flush, MC) {
+     v_allocateTBE;
+     b_issuePUT;
+     x_copyDataFromCacheToTBE;
+     forward_eviction_to_cpu;
+     p_profileDWB;
+     m_popMandatoryQueue;
+  }
+
+  transition({P, M}, FlushX) {
+    ad_writeback_done;
+    p_profileDWBX;
+    m_popMandatoryQueue;
+  }
+
+  transition(PI, Writeback_Ack, I) {
+    w_deallocateTBE;
+    ad_writeback_done;
+    n_popResponseQueue;
+  }
+
+  transition(MC, Writeback_Ack, C) {
+    w_deallocateTBE;
+    clearWriteMask;
+    ad_writeback_done;
+    n_popResponseQueue;
+  }
+
+  transition({I, C}, {Flush, FlushX}) {
+    m_popMandatoryQueue;
+    ad_writeback_done;
+  }
+
+  transition(C, Inv, I) {
+    h_deallocateL1CacheBlock;
+    ad_invalidate_done;
+    p_profileDInv;
+    m_popMandatoryQueue;
+  }
+
+  transition({M, C}, InvX) {
+    ad_invalidate_done;
+    p_profileDInvX;
+    m_popMandatoryQueue;
+  }
+
+  transition(M, InvX1) {
+    ad_invalidate_done;
+    m_popMandatoryQueue;
+  }
+
+  transition({I, P}, {Inv, InvX}) {
+    m_popMandatoryQueue;
+    ad_invalidate_done;
+  }
+
+  // we will invalidate M state unconditionally
+  transition(M, Inv, P) {
+    ad_invalidate_done;
+    p_profileDInv;
+    m_popMandatoryQueue;
+  }
+
+}

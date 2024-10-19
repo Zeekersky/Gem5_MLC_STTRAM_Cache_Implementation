@@ -1,0 +1,58 @@
+{
+    "io-1c-4t-1xc": {
+        "--caches": "", 
+        "--l1d_assoc": "4", 
+        "--l1d_mshrs": "4", 
+        "--l1d_size": "32kB", 
+        "--l1i_assoc": "4", 
+        "--l1i_mshrs": "4", 
+        "--l1i_size": "32kB", 
+        "--l2_size": "256kB", 
+        "--l2cache": "", 
+        "--mem-size": "4GB", 
+        "--nthreads-per-cpu": "4", 
+        "--num-cpus": "1"
+    }, 
+    "io-1c-4t-2xc": {
+        "--caches": "", 
+        "--l1d_assoc": "4", 
+        "--l1d_mshrs": "4", 
+        "--l1d_size": "64kB", 
+        "--l1i_assoc": "4", 
+        "--l1i_mshrs": "4", 
+        "--l1i_size": "64kB", 
+        "--l2_size": "256kB", 
+        "--l2cache": "", 
+        "--mem-size": "4GB", 
+        "--nthreads-per-cpu": "4", 
+        "--num-cpus": "1"
+    }, 
+    "io-1c-4t-4xc": {
+        "--caches": "", 
+        "--l1d_assoc": "4", 
+        "--l1d_mshrs": "4", 
+        "--l1d_size": "128kB", 
+        "--l1i_assoc": "4", 
+        "--l1i_mshrs": "4", 
+        "--l1i_size": "128kB", 
+        "--l2_size": "256kB", 
+        "--l2cache": "", 
+        "--mem-size": "4GB", 
+        "--nthreads-per-cpu": "4", 
+        "--num-cpus": "1"
+    }, 
+    "io-4c-1t": {
+        "--caches": "", 
+        "--l1d_assoc": "4", 
+        "--l1d_mshrs": "4", 
+        "--l1d_size": "32kB", 
+        "--l1i_assoc": "4", 
+        "--l1i_mshrs": "4", 
+        "--l1i_size": "32kB", 
+        "--l2_size": "256kB", 
+        "--l2cache": "", 
+        "--mem-size": "4GB", 
+        "--nthreads-per-cpu": "1", 
+        "--num-cpus": "4"
+    }
+}

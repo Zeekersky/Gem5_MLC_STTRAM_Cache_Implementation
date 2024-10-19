@@ -1,0 +1,7 @@
+# -*- mode:python -*-
+
+Import('*')
+
+SimObject('TestNWAdapterHarness.py')
+
+Source('test_nw_adapter_harness.cc')

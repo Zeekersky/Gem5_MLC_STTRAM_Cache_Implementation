@@ -1,0 +1,13 @@
+#
+# Authors: Tuan Ta
+#
+
+Import('*')
+
+if 'LaneCPU' in env['CPU_MODELS']:
+    SimObject('LaneCPU.py')
+
+    # source files
+    Source('lane.cc')
+
+    # debug flags

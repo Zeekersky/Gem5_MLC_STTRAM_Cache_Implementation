@@ -1,0 +1,290 @@
+#!/usr/bin/env python
+#=========================================================================
+# activityBar.py.template
+#=========================================================================
+#
+# This script generates application activity subplots from gem5 stats.
+#
+#  -h --help        Display this message
+#  -v --verbose     Verbose mode
+#  -o --output      Output filename
+#  -l --limit       Choose which set of 12 apps to generate plots for
+#
+# Author : Chris Torng
+# Date   : September 30, 2013
+#
+
+import matplotlib.pyplot as plt
+import math
+import sys
+import os.path
+import argparse
+
+import numpy as np
+
+#-------------------------------------------------------------------------------
+# Command line processing
+#-------------------------------------------------------------------------------
+
+class ArgumentParserWithCustomError(argparse.ArgumentParser):
+  def error( self, msg = "" ):
+    if ( msg ): print("\n ERROR: %s" % msg)
+    print("")
+    file = open( sys.argv[0] )
+    for ( lineno, line ) in enumerate( file ):
+      if ( line[0] != '#' ): sys.exit(msg != "")
+      if ( (lineno == 2) or (lineno >= 4) ): print( line[1:].rstrip("\n") )
+
+def parse_cmdline():
+  p = ArgumentParserWithCustomError( add_help=False )
+  p.add_argument( "-v", "--verbose", action="store_true"                 )
+  p.add_argument( "-h", "--help",    action="store_true"                 )
+  p.add_argument( "-o", "--output"                                       )
+  p.add_argument( "-l", "--limit",   type=int,  dest="limit", default=0  )
+  opts = p.parse_args()
+  if opts.help: p.error()
+  return opts
+
+#-------------------------------------------------------------------------
+# Calculate figure size
+#-------------------------------------------------------------------------
+# We determine the fig_width_pt by using \showthe\columnwidth in LaTeX
+# and copying the result into the script. Change the aspect ratio as
+# necessary.
+
+fig_width_pt  = 244.0
+inches_per_pt = 1.0/72.27                     # convert pt to inch
+#aspect_ratio  = ( math.sqrt(5) - 1.0 ) / 2.0  # aesthetic golden mean
+
+#fig_width     = fig_width_pt * inches_per_pt  # width in inches
+#fig_height    = fig_width * aspect_ratio      # height in inches
+#fig_size      = [ fig_width, fig_height ]
+
+aspect_ratio  = 0.4
+
+fig_width     = 20                            # width in inches
+fig_height    = fig_width * aspect_ratio      # height in inches
+fig_size      = [ fig_width, fig_height ]
+
+#-------------------------------------------------------------------------
+# Configure matplotlib
+#-------------------------------------------------------------------------
+
+plt.rcParams['pdf.use14corefonts'] = True
+plt.rcParams['font.size']          = 10
+plt.rcParams['font.family']        = 'serif'
+#plt.rcParams['font.serif']         = ['Times']
+plt.rcParams['figure.figsize']     = fig_size
+
+#-------------------------------------------------------------------------
+# Parse command line arguments
+#-------------------------------------------------------------------------
+
+opts = parse_cmdline()
+
+if ( ( opts.limit < 0 ) or ( opts.limit > 6 ) ):
+  print "Invalid limit option! Try [0,6]"
+  sys.exit(1)
+
+limit  = opts.limit
+output = opts.output
+
+#-------------------------------------------------------------------------
+# Plot parameters
+#-------------------------------------------------------------------------
+
+# Bar height
+
+height = 0.50
+
+#-------------------------------------------------------------------------------
+# Build color dictionaries
+#-------------------------------------------------------------------------------
+
+states = [
+  'ACTIVE',
+  'INACTIVE',
+  'EMPTY',
+  'FINISHED',
+  ]
+
+colors = [
+  '#5ca212',
+  '#E0E0E0',
+  '#E0E0E0',
+  '#ffffff',
+]
+
+colordict = {}
+
+for i, state in enumerate( states ):
+  colordict[state] = colors[i]
+
+#-------------------------------------------------------------------------
+# Input datasets
+#-------------------------------------------------------------------------
+# These datasets will be populated by another script.
+#
+# Example input datasets
+#
+#  applications = [
+#    'bfs',
+#    'bilateral',
+#  ]
+#
+#  activity_dataset = {
+#      "bfs": {
+#          "0": [21, 2, 6],
+#          "1": [22, 3, 4]
+#      },
+#      "bilateral": {
+#          "0": [21, 25, 3],
+#          "1": [2, 23, 24]
+#      }
+#  }
+#
+#  state_dataset = {
+#      "bfs": {
+#          "0": ["ACTIVE", "INACTIVE", "ACTIVE"],
+#          "1": ["ACTIVE", "INACTIVE", "ACTIVE"]
+#      },
+#      "bilateral": {
+#          "0": ["INACTIVE", "ACTIVE", "INACTIVE"],
+#          "1": ["INACTIVE", "ACTIVE", "INACTIVE"]
+#      }
+#  }
+#
+#  ratios_dataset = {
+#      "bfs": {
+#          "0": 93.1,
+#          "1": 89.7
+#      },
+#      "bilateral": {
+#          "0": 51.0,
+#          "1": 46.9
+#      }
+#  }
+#
+#  labels_dataset = {
+#      "0": "C0",
+#      "1": "C1",
+#  }
+
+## APPLICATIONS-HOOK ## applications[] ## List of applications to plot
+
+## ACTIVITY-DATASET-HOOK ## activity_dataset{} ## Activity data dict
+
+## STATE-DATASET-HOOK ## state_dataset{} ## State data dict
+
+## RATIOS-DATASET-HOOK ## ratios_dataset{} ## Ratio data dict
+
+## LABELS-DATASET-HOOK ## labels_dataset[] ## Labels
+
+## NORMALIZER-DATASET-HOOK ## normalizer_dataset{} ## Normalizer execution times
+
+#-------------------------------------------------------------------------
+# Create plot
+#-------------------------------------------------------------------------
+
+# Initialize figure
+
+fig = plt.figure()
+
+# Add subplots
+
+subplot_x   = 3
+subplot_y   = 4
+subplot_tot = subplot_x * subplot_y
+subplot_idx = 1
+
+for idx, app in enumerate( applications ):
+
+  if ( idx >= ( limit * subplot_tot ) and idx < ( limit * subplot_tot + subplot_tot ) ):
+
+    activity_set = activity_dataset[app]
+    state_set    = state_dataset[app]
+
+    ax = fig.add_subplot( subplot_x, subplot_y, subplot_idx )
+
+    ax.set_title( app )
+
+    # Set up x and y ticks
+
+    max_xtick = sum(activity_set.itervalues().next())
+    step = 1 if ( max_xtick < 8 ) else max_xtick / 8
+
+    ind_x = np.array( range(0, max_xtick + 1, step) )
+    ind_y = np.array( range(0, len(labels_dataset)) )
+
+    ax.set_xticks( ind_x )
+    ax.set_yticks( ind_y+height/2 )
+
+    ax.set_xticklabels( range( 0, max_xtick + 1, step ) )
+    ax.set_yticklabels( ['%s: %s%%' \
+      % (labels_dataset[key], ratios_dataset[app][key]) \
+        for key in sorted(labels_dataset.iterkeys())] )
+
+    # Set tick positions
+
+    ax.xaxis.set_ticks_position('bottom')
+
+    # Turn off some tick marks
+
+    ax.tick_params(axis='y', which='major', left='off', right='off')
+    ax.xaxis.get_major_ticks()[0].set_visible(False)
+
+    # Rotate labels
+
+    xticks = ax.get_xticklabels()
+    for tick in xticks:
+        tick.set_rotation(75)
+
+    # Generate each stacked bar
+
+    for inneridx in range(len(labels_dataset)):
+      row_activity = activity_set[str(inneridx)]
+      row_states   = state_set[str(inneridx)]
+
+      lefts = np.insert(np.cumsum(row_activity),0,0)[:-1]
+
+      for (left, data, state) in zip( lefts, row_activity, row_states ):
+        blockcolor = colordict[state]
+        ax.bar(left=left, height=height, width=data, bottom=inneridx,
+               color=blockcolor, orientation="horizontal", label='...',
+               edgecolor='none', linewidth=0.0)
+
+    # Plot normalizer line and marker
+
+    if normalizer_dataset:
+      x_norm = int( normalizer_dataset[app] * 1.0e12 )
+      ax.scatter( x=x_norm, y=0, s=25, color='r', marker='x', linewidth=1.0, zorder=10 )
+      plt.axvline( x=x_norm, ymin=0.05, ymax=0.95, color='r', linewidth=1.0, linestyle='-', zorder=10 )
+
+    # Increment subplot index
+
+    subplot_idx += 1
+
+# Pretty layout
+
+plt.tight_layout()
+
+# Turn off top and right border
+
+#ax.spines['right'].set_visible(False)
+#ax.spines['top'].set_visible(False)
+#ax.xaxis.set_ticks_position('bottom')
+#ax.yaxis.set_ticks_position('left')
+
+#-------------------------------------------------------------------------
+# Generate PDF
+#-------------------------------------------------------------------------
+
+input_basename = os.path.splitext( os.path.basename(sys.argv[0]) )[0]
+
+if output:
+  output_filename = output
+else:
+  output_filename = input_basename + '-' + str( limit ) + '.py.pdf'
+
+plt.savefig( output_filename, bbox_inches='tight' )
+

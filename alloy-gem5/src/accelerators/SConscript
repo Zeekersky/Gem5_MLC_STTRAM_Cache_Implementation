@@ -1,0 +1,28 @@
+# -*- mode:python -*-
+
+Import('*')
+
+if env['TARGET_ISA'] != 'null':
+
+    SimObject('BaseAccelerator.py')
+    Source('base_accelerator.cc')
+    DebugFlag('ACCEL', 'Accelerator-related debug messages')
+
+    SimObject('NullAccelerator.py')
+    Source('null_accelerator.cc')
+
+    SimObject('DelayedNullAccelerator.py')
+    Source('delayed_null_accelerator.cc')
+
+    SimObject('MemoryMappedXcel.py')
+    Source('memory_mapped_xcel.cc')
+    DebugFlag('Xcel', 'Xcel debug flag')
+
+    SimObject('TensorSumXcel.py')
+    Source('tensor_sum_xcel.cc')
+
+    SimObject('EmbeddingXcel.py')
+    Source('embedding_xcel.cc')
+
+    SimObject('EmbeddingBwXcel.py')
+    Source('embedding_bw_xcel.cc')
