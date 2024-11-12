@@ -70,7 +70,6 @@ CacheMemory::CacheMemory(const Params *p)
     m_is_instruction_only_cache = p->is_icache;
     m_resource_stalls = p->resourceStalls;
     m_block_size = p->block_size; // may be 0 at this point. Updated in init()
-    m_logEnabledForWB = false;
 }
 
 void CacheMemory::init()
@@ -126,18 +125,17 @@ int CacheMemory::findTagInSet(int64_t cacheSet, Addr tag) const
 
 // By AP
 // Take address and findout which subblock of that block is written also find out the set and way of that block
-void CacheMemory::checkSubBlockWB(DataBlock old_data_ptr, DataBlock new_data_ptr)
+void CacheMemory::checkSubBlockWB(DataBlock new_data_ptr, AbstractCacheEntry *old_entry)
 {
-    // std::cout << "WB_Data or l1_PutX event triggered";
-    // assert(&old_data_ptr != nullptr && &new_data_ptr != nullptr);
-
+    assert(old_entry != nullptr);
+    int set = old_entry->getSetIndex();
+    int way = old_entry->getWayIndex();
     for (int i = 0; i < m_block_size; i++)
     {
-        if (old_data_ptr.getByte(i) != new_data_ptr.getByte(i))
+        if (old_entry->getDataBlk().getByte(i) != new_data_ptr.getByte(i))
         {
             int subblock = i / (m_block_size / 4);
-            // Set and way's subblock number write
-            cout << "Subblock - " << subblock + 1 << " written" << endl;
+            cout << "Set - " << set << " Way - " << way << " Subblock - " << subblock + 1 << " written" << endl;
         }
     }
 }

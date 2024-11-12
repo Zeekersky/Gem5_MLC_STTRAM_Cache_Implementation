@@ -117,7 +117,7 @@ public:
   void setMRU(const AbstractCacheEntry *e);
 
   // By AP
-  void checkSubBlockWB(DataBlock old_data_ptr, DataBlock new_data_ptr);
+  void checkSubBlockWB(DataBlock new_data_ptr, AbstractCacheEntry *entry);
 
   // Functions for locking and unlocking cache lines corresponding to the
   // provided address.  These are required for supporting atomic memory
@@ -216,8 +216,6 @@ private:
   int m_start_index_bit;
   bool m_resource_stalls;
   int m_block_size;
-  // By AP
-  bool m_logEnabledForWB;
 };
 
 std::ostream &operator<<(std::ostream &out, const CacheMemory &obj);

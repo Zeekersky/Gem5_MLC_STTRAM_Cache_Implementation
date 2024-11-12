@@ -287,8 +287,7 @@ structure (CacheMemory, external = "yes") {
   void setMRU(AbstractCacheEntry);
 
   // By AP
-  void checkSubBlockWB(DataBlock, DataBlock);
-  bool m_logEnabledForWB;
+  void checkSubBlockWB(DataBlock, AbstractCacheEntry);
 
   void recordRequestType(CacheRequestType, Addr);
   bool checkResourceAvailable(CacheResourceType, Addr);

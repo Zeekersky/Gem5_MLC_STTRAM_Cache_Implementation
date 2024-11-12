@@ -152,9 +152,6 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   Tick cyclesToTicks(Cycles c);
   Cycles ticksToCycles(Tick t);
 
-  // By AP
-  bool m_logEnabledForWB;
-
   void set_cache_entry(AbstractCacheEntry a);
   void unset_cache_entry();
   void set_tbe(TBE a);
@@ -626,18 +623,25 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     profileMsgDelay(1, ticksToCycles(delay));
   }
 
-  action(m_writeDataToCache, "m", desc="Write data from response queue to cache") {
+  // By AP
+  action(m_writeWBDataToCache, "ap1", desc="Write data from response queue to cache") {
     peek(responseL2Network_in, ResponseMsg) {
       assert(is_valid(cache_entry));
 
       // By AP
-      if(m_logEnabledForWB)
-      {
-        // Print Cache Block Address
-        L2cache.checkSubBlockWB(cache_entry.DataBlk, in_msg.DataBlk);
-        m_logEnabledForWB := false;
-      }
+      L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
 
+      cache_entry.DataBlk := in_msg.DataBlk;
+      if (in_msg.Dirty) {
+        cache_entry.Dirty := in_msg.Dirty;
+        ++L2cache.write_Count;
+      }
+    }
+  }
+
+  action(m_writeMemDataToCache, "ap2", desc="Write data from response queue to cache") {
+    peek(responseL2Network_in, ResponseMsg) {
+      assert(is_valid(cache_entry));
       cache_entry.DataBlk := in_msg.DataBlk;
       if (in_msg.Dirty) {
         cache_entry.Dirty := in_msg.Dirty;
@@ -651,7 +655,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
       assert(is_valid(cache_entry));
       if (in_msg.Dirty) {
         // By AP
-        L2cache.checkSubBlockWB(cache_entry.DataBlk, in_msg.DataBlk);
+        L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
         cache_entry.DataBlk := in_msg.DataBlk;
         cache_entry.Dirty := in_msg.Dirty;
         ++L2cache.write_Count;
@@ -659,12 +663,6 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
       }
     }
   }
-
-  action(m_LogEnableForWB_Flag, "ap", desc="Logging will be enabled for cache block address") {
-    m_logEnabledForWB := true;
-  }
-
-
 
   action(q_updateAck, "q", desc="update pending ack count") {
     peek(responseL2Network_in, ResponseMsg) {
@@ -881,14 +879,18 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   // transitions from IS/IM
 
   transition(ISS, Mem_Data, MT_MB) {
-    m_writeDataToCache;
+    // By AP
+    m_writeMemDataToCache;
+
     ex_sendExclusiveDataToGetSRequestors;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
   }
 
   transition(IS, Mem_Data, SS) {
-    m_writeDataToCache;
+    // By AP
+    m_writeMemDataToCache;
+    
     e_sendDataToGetSRequestors;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
@@ -896,7 +898,9 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   transition(IM, Mem_Data, MT_MB) {
-    m_writeDataToCache;
+    // By AP
+    m_writeMemDataToCache;
+    
     ee_sendDataToGetXRequestor;
     s_deallocateTBE;
     o_popIncomingResponseQueue;
@@ -1046,17 +1050,15 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   transition(MT_IIB, {WB_Data, WB_Data_clean}, MT_SB) {
     // By AP
-    m_LogEnableForWB_Flag;
+    m_writeWBDataToCache;
 
-    m_writeDataToCache;
     o_popIncomingResponseQueue;
   }
 
   transition(MT_IB, {WB_Data, WB_Data_clean}, SS) {
     // By AP
-    m_LogEnableForWB_Flag;
+    m_writeWBDataToCache;
 
-    m_writeDataToCache;
     o_popIncomingResponseQueue;
     kd_wakeUpDependents;
   }
