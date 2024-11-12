@@ -285,6 +285,11 @@ structure (CacheMemory, external = "yes") {
   void setMRU(Addr);
   void setMRU(Addr, int);
   void setMRU(AbstractCacheEntry);
+
+  // By AP
+  void checkSubBlockWB(DataBlock, DataBlock);
+  bool m_logEnabledForWB;
+
   void recordRequestType(CacheRequestType, Addr);
   bool checkResourceAvailable(CacheResourceType, Addr);
   CacheMemory getPtr();
@@ -296,6 +301,9 @@ structure (CacheMemory, external = "yes") {
 
   Scalar demand_misses;
   Scalar demand_hits;
+
+  //by AP
+  Scalar write_Count;
 
   Scalar self_invalidations;
   Scalar self_invalidations_saved;

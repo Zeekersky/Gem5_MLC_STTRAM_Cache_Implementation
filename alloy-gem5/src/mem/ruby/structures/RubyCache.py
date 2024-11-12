@@ -29,7 +29,9 @@
 
 from m5.params import *
 from m5.proxy import *
-from PseudoLRUReplacementPolicy import PseudoLRUReplacementPolicy
+# By AP
+# from PseudoLRUReplacementPolicy import PseudoLRUReplacementPolicy
+from LRUReplacementPolicy import LRUReplacementPolicy
 from m5.SimObject import SimObject
 
 class RubyCache(SimObject):
@@ -38,7 +40,10 @@ class RubyCache(SimObject):
     cxx_header = "mem/ruby/structures/CacheMemory.hh"
     size = Param.MemorySize("capacity in bytes");
     assoc = Param.Int("");
-    replacement_policy = Param.ReplacementPolicy(PseudoLRUReplacementPolicy(),
+    # replacement_policy = Param.ReplacementPolicy(PseudoLRUReplacementPolicy(),
+    #                      "")
+    # by AP
+    replacement_policy = Param.ReplacementPolicy(LRUReplacementPolicy(),
                          "")
     start_index_bit = Param.Int(6, "index start, default 6 for 64-byte line");
     is_icache = Param.Bool(False, "is instruction only cache");

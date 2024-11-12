@@ -50,166 +50,176 @@
 
 class CacheMemory : public SimObject
 {
-  public:
-    typedef RubyCacheParams Params;
-    CacheMemory(const Params *p);
-    ~CacheMemory();
+public:
+  typedef RubyCacheParams Params;
+  CacheMemory(const Params *p);
+  ~CacheMemory();
 
-    void init();
+  void init();
 
-    CacheMemory* getPtr() { return this; }
+  CacheMemory *getPtr() { return this; }
 
-    // Public Methods
-    // perform a cache access and see if we hit or not.  Return true on a hit.
-    bool tryCacheAccess(Addr address, RubyRequestType type,
-                        DataBlock*& data_ptr);
+  // Public Methods
+  // perform a cache access and see if we hit or not.  Return true on a hit.
+  bool tryCacheAccess(Addr address, RubyRequestType type,
+                      DataBlock *&data_ptr);
 
-    // similar to above, but doesn't require full access check
-    bool testCacheAccess(Addr address, RubyRequestType type,
-                         DataBlock*& data_ptr);
+  // similar to above, but doesn't require full access check
+  bool testCacheAccess(Addr address, RubyRequestType type,
+                       DataBlock *&data_ptr);
 
-    // tests to see if an address is present in the cache
-    bool isTagPresent(Addr address) const;
+  // tests to see if an address is present in the cache
+  bool isTagPresent(Addr address) const;
 
-    // Returns true if there is:
-    //   a) a tag match on this address or there is
-    //   b) an unused line in the same cache "way"
-    bool cacheAvail(Addr address) const;
+  // Returns true if there is:
+  //   a) a tag match on this address or there is
+  //   b) an unused line in the same cache "way"
+  bool cacheAvail(Addr address) const;
 
-    // find an unused entry and sets the tag appropriate for the address
-    AbstractCacheEntry* allocate(Addr address,
-                                 AbstractCacheEntry* new_entry, bool touch);
-    AbstractCacheEntry* allocate(Addr address, AbstractCacheEntry* new_entry)
-    {
-        return allocate(address, new_entry, true);
-    }
-    void allocateVoid(Addr address, AbstractCacheEntry* new_entry)
-    {
-        allocate(address, new_entry, true);
-    }
+  // find an unused entry and sets the tag appropriate for the address
+  AbstractCacheEntry *allocate(Addr address,
+                               AbstractCacheEntry *new_entry, bool touch);
+  AbstractCacheEntry *allocate(Addr address, AbstractCacheEntry *new_entry)
+  {
+    return allocate(address, new_entry, true);
+  }
+  void allocateVoid(Addr address, AbstractCacheEntry *new_entry)
+  {
+    allocate(address, new_entry, true);
+  }
 
-    // Explicitly free up this address
-    void deallocate(Addr address);
+  // Explicitly free up this address
+  void deallocate(Addr address);
 
-    // Returns with the physical address of the conflicting cache line
-    Addr cacheProbe(Addr address) const;
+  // Returns with the physical address of the conflicting cache line
+  Addr cacheProbe(Addr address) const;
 
-    // looks an address up in the cache
-    AbstractCacheEntry* lookup(Addr address);
-    const AbstractCacheEntry* lookup(Addr address) const;
+  // looks an address up in the cache
+  AbstractCacheEntry *lookup(Addr address);
+  const AbstractCacheEntry *lookup(Addr address) const;
 
-    int getNumLines() const;
-    Addr popNextLine();
+  int getNumLines() const;
+  Addr popNextLine();
 
-    Cycles getTagLatency() const { return tagArray.getLatency(); }
-    Cycles getDataLatency() const { return dataArray.getLatency(); }
+  Cycles getTagLatency() const { return tagArray.getLatency(); }
+  Cycles getDataLatency() const { return dataArray.getLatency(); }
 
-    bool isBlockInvalid(int64_t cache_set, int64_t loc);
-    bool isBlockNotBusy(int64_t cache_set, int64_t loc);
+  bool isBlockInvalid(int64_t cache_set, int64_t loc);
+  bool isBlockNotBusy(int64_t cache_set, int64_t loc);
 
-    // Hook for checkpointing the contents of the cache
-    void recordCacheContents(int cntrl, CacheRecorder* tr) const;
+  // Hook for checkpointing the contents of the cache
+  void recordCacheContents(int cntrl, CacheRecorder *tr) const;
 
-    // Set this address to most recently used
-    void setMRU(Addr address);
-    void setMRU(Addr addr, int occupancy);
-    int getReplacementWeight(int64_t set, int64_t loc);
-    void setMRU(const AbstractCacheEntry *e);
+  // Set this address to most recently used
+  void setMRU(Addr address);
+  void setMRU(Addr addr, int occupancy);
+  int getReplacementWeight(int64_t set, int64_t loc);
+  void setMRU(const AbstractCacheEntry *e);
 
-    // Functions for locking and unlocking cache lines corresponding to the
-    // provided address.  These are required for supporting atomic memory
-    // accesses.  These are to be used when only the address of the cache entry
-    // is available.  In case the entry itself is available. use the functions
-    // provided by the AbstractCacheEntry class.
-    void setLocked (Addr addr, int context);
-    void clearLocked (Addr addr);
-    bool isLocked (Addr addr, int context);
+  // By AP
+  void checkSubBlockWB(DataBlock old_data_ptr, DataBlock new_data_ptr);
 
-    // Print cache contents
-    void print(std::ostream& out) const;
-    void printData(std::ostream& out) const;
+  // Functions for locking and unlocking cache lines corresponding to the
+  // provided address.  These are required for supporting atomic memory
+  // accesses.  These are to be used when only the address of the cache entry
+  // is available.  In case the entry itself is available. use the functions
+  // provided by the AbstractCacheEntry class.
+  void setLocked(Addr addr, int context);
+  void clearLocked(Addr addr);
+  bool isLocked(Addr addr, int context);
 
-    void regStats();
-    bool checkResourceAvailable(CacheResourceType res, Addr addr);
-    void recordRequestType(CacheRequestType requestType, Addr addr);
+  // Print cache contents
+  void print(std::ostream &out) const;
+  void printData(std::ostream &out) const;
 
-  public:
-    Stats::Scalar m_demand_hits;
-    Stats::Scalar m_demand_misses;
-    Stats::Formula m_demand_accesses;
+  void regStats();
+  bool checkResourceAvailable(CacheResourceType res, Addr addr);
+  void recordRequestType(CacheRequestType requestType, Addr addr);
 
-    Stats::Scalar m_sw_prefetches;
-    Stats::Scalar m_hw_prefetches;
-    Stats::Formula m_prefetches;
+public:
+  Stats::Scalar m_demand_hits;
+  Stats::Scalar m_demand_misses;
+  Stats::Formula m_demand_accesses;
 
-    Stats::Scalar m_self_invalidations;
-    Stats::Scalar m_self_invalidations_saved;
-    Stats::Scalar m_self_invalidation_bytes;
-    Stats::Scalar m_self_writebacks;
-    Stats::Scalar m_self_writebacks_saved;
-    Stats::Scalar m_self_writeback_bytes;
+  // by AP
+  Stats::Scalar m_write_Count;
 
-    Stats::Vector m_accessModeType;
+  Stats::Scalar m_sw_prefetches;
+  Stats::Scalar m_hw_prefetches;
+  Stats::Formula m_prefetches;
 
-    Stats::Scalar numDataArrayReads;
-    Stats::Scalar numDataArrayWrites;
-    Stats::Scalar numTagArrayReads;
-    Stats::Scalar numTagArrayWrites;
+  Stats::Scalar m_self_invalidations;
+  Stats::Scalar m_self_invalidations_saved;
+  Stats::Scalar m_self_invalidation_bytes;
+  Stats::Scalar m_self_writebacks;
+  Stats::Scalar m_self_writebacks_saved;
+  Stats::Scalar m_self_writeback_bytes;
 
-    Stats::Scalar numTagArrayStalls;
-    Stats::Scalar numDataArrayStalls;
+  Stats::Vector m_accessModeType;
 
-    int getCacheSize() const { return m_cache_size; }
-    int getBlockSize() const { return m_block_size; }
-    int getCacheAssoc() const { return m_cache_assoc; }
-    int getNumBlocks() const { return m_cache_num_sets * m_cache_assoc; }
-    Addr getAddressAtIdx(int idx) const;
+  Stats::Scalar numDataArrayReads;
+  Stats::Scalar numDataArrayWrites;
+  Stats::Scalar numTagArrayReads;
+  Stats::Scalar numTagArrayWrites;
 
-    // SLICC work-around
-    void increase_self_invalidation_bytes(int bytes) {
-        m_self_invalidation_bytes += bytes;
-    }
+  Stats::Scalar numTagArrayStalls;
+  Stats::Scalar numDataArrayStalls;
 
-    void increase_self_writeback_bytes(int bytes) {
-        m_self_writeback_bytes += bytes;
-    }
+  int getCacheSize() const { return m_cache_size; }
+  int getBlockSize() const { return m_block_size; }
+  int getCacheAssoc() const { return m_cache_assoc; }
+  int getNumBlocks() const { return m_cache_num_sets * m_cache_assoc; }
+  Addr getAddressAtIdx(int idx) const;
 
-  private:
-    // convert a Address to its location in the cache
-    int64_t addressToCacheSet(Addr address) const;
+  // SLICC work-around
+  void increase_self_invalidation_bytes(int bytes)
+  {
+    m_self_invalidation_bytes += bytes;
+  }
 
-    // Given a cache tag: returns the index of the tag in a set.
-    // returns -1 if the tag is not found.
-    int findTagInSet(int64_t line, Addr tag) const;
-    int findTagInSetIgnorePermissions(int64_t cacheSet, Addr tag) const;
+  void increase_self_writeback_bytes(int bytes)
+  {
+    m_self_writeback_bytes += bytes;
+  }
 
-    // Private copy constructor and assignment operator
-    CacheMemory(const CacheMemory& obj);
-    CacheMemory& operator=(const CacheMemory& obj);
+private:
+  // convert a Address to its location in the cache
+  int64_t addressToCacheSet(Addr address) const;
 
-  private:
-    // Data Members (m_prefix)
-    bool m_is_instruction_only_cache;
+  // Given a cache tag: returns the index of the tag in a set.
+  // returns -1 if the tag is not found.
+  int findTagInSet(int64_t line, Addr tag) const;
+  int findTagInSetIgnorePermissions(int64_t cacheSet, Addr tag) const;
 
-    // The first index is the # of cache lines.
-    // The second index is the the amount associativity.
-    std::unordered_map<Addr, int> m_tag_index;
-    std::vector<std::vector<AbstractCacheEntry*> > m_cache;
+  // Private copy constructor and assignment operator
+  CacheMemory(const CacheMemory &obj);
+  CacheMemory &operator=(const CacheMemory &obj);
 
-    AbstractReplacementPolicy *m_replacementPolicy_ptr;
+private:
+  // Data Members (m_prefix)
+  bool m_is_instruction_only_cache;
 
-    BankedArray dataArray;
-    BankedArray tagArray;
+  // The first index is the # of cache lines.
+  // The second index is the the amount associativity.
+  std::unordered_map<Addr, int> m_tag_index;
+  std::vector<std::vector<AbstractCacheEntry *>> m_cache;
 
-    int m_cache_size;
-    int m_cache_num_sets;
-    int m_cache_num_set_bits;
-    int m_cache_assoc;
-    int m_start_index_bit;
-    bool m_resource_stalls;
-    int m_block_size;
+  AbstractReplacementPolicy *m_replacementPolicy_ptr;
+
+  BankedArray dataArray;
+  BankedArray tagArray;
+
+  int m_cache_size;
+  int m_cache_num_sets;
+  int m_cache_num_set_bits;
+  int m_cache_assoc;
+  int m_start_index_bit;
+  bool m_resource_stalls;
+  int m_block_size;
+  // By AP
+  bool m_logEnabledForWB;
 };
 
-std::ostream& operator<<(std::ostream& out, const CacheMemory& obj);
+std::ostream &operator<<(std::ostream &out, const CacheMemory &obj);
 
 #endif // __MEM_RUBY_STRUCTURES_CACHEMEMORY_HH__
