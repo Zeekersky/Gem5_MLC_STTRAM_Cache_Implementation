@@ -117,7 +117,9 @@ public:
   void setMRU(const AbstractCacheEntry *e);
 
   // By AP
-  void checkSubBlockWB(DataBlock new_data_ptr, AbstractCacheEntry *entry);
+  // void checkSubBlockWB(DataBlock new_data_ptr, AbstractCacheEntry *entry);
+  void checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_data_ptr, Addr addr);
+  int getSubblockWBCount(int index);
 
   // Functions for locking and unlocking cache lines corresponding to the
   // provided address.  These are required for supporting atomic memory
@@ -156,6 +158,8 @@ public:
   Stats::Scalar m_self_writeback_bytes;
 
   Stats::Vector m_accessModeType;
+  // By AP
+  Stats::Vector m_Subblock_WB_stats;
 
   Stats::Scalar numDataArrayReads;
   Stats::Scalar numDataArrayWrites;
@@ -216,6 +220,10 @@ private:
   int m_start_index_bit;
   bool m_resource_stalls;
   int m_block_size;
+  // By AP
+  int m_Subblock_num;
+  std::vector<int> m_Subblock_checkWB;
+  // std::vector<std::vector<std::vector<int>>> m_Subblock_checkWB_3D;
 };
 
 std::ostream &operator<<(std::ostream &out, const CacheMemory &obj);

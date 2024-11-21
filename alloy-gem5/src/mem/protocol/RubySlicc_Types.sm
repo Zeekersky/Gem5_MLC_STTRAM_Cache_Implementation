@@ -287,7 +287,8 @@ structure (CacheMemory, external = "yes") {
   void setMRU(AbstractCacheEntry);
 
   // By AP
-  void checkSubBlockWB(DataBlock, AbstractCacheEntry);
+  // void checkSubBlockWB(DataBlock, AbstractCacheEntry);
+  void checkSubBlockWB_addr(DataBlock, DataBlock, Addr);
 
   void recordRequestType(CacheRequestType, Addr);
   bool checkResourceAvailable(CacheResourceType, Addr);

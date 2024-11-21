@@ -624,28 +624,29 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   // By AP
-  action(m_writeWBDataToCache, "ap1", desc="Write data from response queue to cache") {
+  action(ap1_writeWBDataToCache, "ap1", desc="Write data from response queue to cache") {
     peek(responseL2Network_in, ResponseMsg) {
       assert(is_valid(cache_entry));
 
       // By AP
-      L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
-
+      // L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
+      L2cache.checkSubBlockWB_addr(in_msg.DataBlk, cache_entry.DataBlk, address);
+      ++L2cache.write_Count;
       cache_entry.DataBlk := in_msg.DataBlk;
+
       if (in_msg.Dirty) {
         cache_entry.Dirty := in_msg.Dirty;
-        ++L2cache.write_Count;
       }
     }
   }
 
-  action(m_writeMemDataToCache, "ap2", desc="Write data from response queue to cache") {
+  action(ap2_writeMemDataToCache, "ap2", desc="Write data from response queue to cache") {
     peek(responseL2Network_in, ResponseMsg) {
       assert(is_valid(cache_entry));
       cache_entry.DataBlk := in_msg.DataBlk;
       if (in_msg.Dirty) {
         cache_entry.Dirty := in_msg.Dirty;
-        ++L2cache.write_Count;
+        // ++L2cache.write_Count;
       }
     }
   }
@@ -653,13 +654,13 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   action(mr_writeDataToCacheFromRequest, "mr", desc="Write data from response queue to cache") {
     peek(L1RequestL2Network_in, RequestMsg) {
       assert(is_valid(cache_entry));
+      // By AP
+      // L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
+      L2cache.checkSubBlockWB_addr(in_msg.DataBlk, cache_entry.DataBlk, address);
+      ++L2cache.write_Count;
       if (in_msg.Dirty) {
-        // By AP
-        L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
         cache_entry.DataBlk := in_msg.DataBlk;
         cache_entry.Dirty := in_msg.Dirty;
-        ++L2cache.write_Count;
-
       }
     }
   }
@@ -880,7 +881,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   transition(ISS, Mem_Data, MT_MB) {
     // By AP
-    m_writeMemDataToCache;
+    ap2_writeMemDataToCache;
 
     ex_sendExclusiveDataToGetSRequestors;
     s_deallocateTBE;
@@ -889,7 +890,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   transition(IS, Mem_Data, SS) {
     // By AP
-    m_writeMemDataToCache;
+    ap2_writeMemDataToCache;
     
     e_sendDataToGetSRequestors;
     s_deallocateTBE;
@@ -899,7 +900,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   transition(IM, Mem_Data, MT_MB) {
     // By AP
-    m_writeMemDataToCache;
+    ap2_writeMemDataToCache;
     
     ee_sendDataToGetXRequestor;
     s_deallocateTBE;
@@ -1050,14 +1051,14 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   transition(MT_IIB, {WB_Data, WB_Data_clean}, MT_SB) {
     // By AP
-    m_writeWBDataToCache;
+    ap1_writeWBDataToCache;
 
     o_popIncomingResponseQueue;
   }
 
   transition(MT_IB, {WB_Data, WB_Data_clean}, SS) {
     // By AP
-    m_writeWBDataToCache;
+    ap1_writeWBDataToCache;
 
     o_popIncomingResponseQueue;
     kd_wakeUpDependents;
