@@ -131,88 +131,42 @@ int CacheMemory::findTagInSet(int64_t cacheSet, Addr tag) const
 }
 
 // By AP
+// Compute the sequence of subblocks based on max write counts
+/*
+ * Example:
+ * Subblock 1: 1, Subblock 2: 2, Subblock 3: 1, Subblock 4: 0 => Sequence: "2134"
+ */
+int CacheMemory::getSubblockSequence(int set, int way)
+{
+    vector<pair<int, int>> subblock_counts;
+
+    for (int i = 0; i < m_Subblock_num; i++)
+    {
+        int counter_idx = set * m_cache_assoc * m_Subblock_num +
+                          way * m_Subblock_num + i;
+        int count = m_Subblock_checkWB[counter_idx];
+        subblock_counts.emplace_back(i + 1, count);
+    }
+
+    sort(subblock_counts.begin(), subblock_counts.end(),
+         [](const pair<int, int> &a, const pair<int, int> &b)
+         {
+             return (a.second > b.second) || (a.second == b.second && a.first < b.first);
+         });
+
+    int sequence = 0;
+    for (const auto &subblock : subblock_counts)
+    {
+        // sequence += to_string(subblock.first);
+        sequence = sequence * 10 + subblock.first;
+    }
+
+    return sequence;
+}
+
+// By AP
 // Take address and findout which subblock of that block is written also find out the set and way of that block
-// void CacheMemory::checkSubBlockWB(DataBlock new_data_ptr, AbstractCacheEntry *old_entry)
-// {
-//     assert(old_entry != nullptr);
-//     int set = old_entry->getSetIndex();
-//     int way = old_entry->getWayIndex();
-
-//     // for (int i = 0; i < m_block_size; i++)
-//     // {
-//     //     if (old_entry->getDataBlk().getByte(i) != new_data_ptr.getByte(i))
-//     //     {
-//     //         int subblock = i / (m_block_size / m_Subblock_num);
-//     //         // cout << "Set - " << set << " Way - " << way << " Subblock - " << subblock + 1 << " written" << endl;
-//     //         m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + subblock]++;
-//     //         cout << "Set - " << set << " Way - " << way << " Subblock - " << subblock + 1 << " Count - " << m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + subblock] << endl;
-//     //         // reset i to next subblock if any write back found on a subblock
-//     //         i = (subblock + 1) * (m_block_size / m_Subblock_num) - 1;
-//     //     }
-//     // }
-
-//     // Use nested for loop. One for iterating all subblocks and another for iterating all bytes of data on each subblock. Fullblock is taken as it is.
-//     for (int i = 0; i < m_Subblock_num; i++)
-//     {
-//         bool subblock_write = false;
-//         for (int j = 0; j < m_block_size / m_Subblock_num; j++)
-//         {
-//             if (old_entry->getDataBlk().getByte(i * (m_block_size / m_Subblock_num) + j) != new_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j))
-//             {
-//                 subblock_write = true;
-//                 break;
-//             }
-//         }
-//         if (subblock_write)
-//         {
-//             // cout << "Set - " << set << " Way - " << way << " Subblock - " << i + 1 << " written" << endl;
-//             ++m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i];
-//             cout << "Set - " << set << " Way - " << way << " Subblock - " << i + 1 << " Count - " << m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i] << endl;
-//         }
-//     }
-// }
-
-// void CacheMemory::checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_data_ptr, Addr addr)
-// {
-//     assert(addr == makeLineAddress(addr));
-//     int set = addressToCacheSet(addr);
-//     int way = findTagInSet(set, addr);
-//     cout << "Set - " << set << " Way - " << way;
-//     for (int i = 0; i < m_Subblock_num; i++)
-//     {
-//         bool subblock_writen = false;
-//         for (int j = 0; j < m_block_size / m_Subblock_num; j++)
-//         {
-//             assert(old_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j) == m_cache[set][way]->getDataBlk().getByte(i * (m_block_size / m_Subblock_num) + j));
-//             if (old_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j) != new_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j))
-//             {
-//                 subblock_writen = true;
-//                 cout << "Byte No.: " << i * (m_block_size / m_Subblock_num) + j << " Set - " << set << " Way - " << way << " Subblock - " << i + 1 << endl;
-//                 // cout << " Old Data Block - " << static_cast<int>(old_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j)) << " New Data Block - " << static_cast<int>(new_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j)) << endl;
-//                 // m_cache[set][way]->getDataBlk().setByte(i * (m_block_size / m_Subblock_num) + j, new_data_ptr.getByte(i * (m_block_size / m_Subblock_num) + j));
-//                 break;
-//             }
-//             // else
-//             // {
-//             //     cout << " Not Written" << " Byte No.: " << i * (m_block_size / m_Subblock_num) + j << " Set - " << set << " Way - " << way << " Subblock - " << i + 1 << endl;
-//             // }
-//         }
-//         if (subblock_writen)
-//         {
-//             // cout << "Addr - " << addr << " Subblock - " << i + 1 << " written" << endl;
-//             ++m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i];
-//             // Print set and way and subblock and its writeback count and new content of that byte
-//             // convert new_data_ptr.getByte(i) to print as string
-//             // cout << "Set - " << set << " Way - " << way << " Subblock - " << i << " Count - " << m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i] << endl;
-//             cout << " Count - " << m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i] << endl;
-//             // cout << "Set - " << set << " Way - " << way << " Subblock - " << i + 1 << " Count - " << m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i] << " " << to_string(static_cast<int>(new_data_ptr.getByte(i))) << endl;
-//         }
-//         m_Subblock_WB_stats[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i] = m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i];
-//         cout << " " << i + 1 << ". Count-" << m_Subblock_checkWB[set * m_cache_assoc * m_Subblock_num + way * m_Subblock_num + i];
-//     }
-//     cout << endl;
-// }
-
+// and increment the counter of that subblock
 void CacheMemory::checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_data_ptr, Addr addr)
 {
     assert(addr == makeLineAddress(addr));
@@ -232,7 +186,7 @@ void CacheMemory::checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_dat
             if (old_data_ptr.getByte(byte_idx) != new_data_ptr.getByte(byte_idx))
             {
                 subblock_written = true;
-                cout << "Byte No.: " << byte_idx << " Set - " << set << " Way - " << way << " Subblock - " << i + 1;
+                // cout << "Byte No.: " << byte_idx << " Set - " << set << " Way - " << way << " Subblock - " << i + 1;
                 break;
             }
         }
@@ -241,17 +195,16 @@ void CacheMemory::checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_dat
         if (subblock_written)
         {
             m_Subblock_checkWB[counter_idx]++;
-            cout << " Count - " << m_Subblock_checkWB[counter_idx] << endl;
+            // cout << " Count - " << m_Subblock_checkWB[counter_idx] << endl;
         }
         m_Subblock_WB_stats[counter_idx] = m_Subblock_checkWB[counter_idx];
     }
+    int subblock_sequence = getSubblockSequence(set, way);
+    cout << "Subblock Sequence: " << subblock_sequence << endl;
+    m_cache_predictor->addEntry(addr, addr, subblock_sequence);
+    // uint64_t m_key = m_cache_predictor->makeKey(addr, addr);
+    // m_cache_predictor->printByKey(m_key, cout);
 }
-
-// Write a function to get the count of writebacks of a subblock by taking the index
-// int CacheMemory::getSubblockWBCount(int index)
-// {
-//     return m_Subblock_checkWB[index];
-// }
 
 // Given a cache index: returns the index of the tag in a set.
 // returns -1 if the tag is not found.

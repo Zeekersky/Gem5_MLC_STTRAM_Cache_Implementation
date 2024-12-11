@@ -47,6 +47,10 @@
 #include "mem/ruby/system/CacheRecorder.hh"
 #include "params/RubyCache.hh"
 #include "sim/sim_object.hh"
+// By AP
+#include "mem/ruby/structures/CachePredictor.hh"
+
+
 
 class CacheMemory : public SimObject
 {
@@ -120,6 +124,9 @@ public:
   // void checkSubBlockWB(DataBlock new_data_ptr, AbstractCacheEntry *entry);
   void checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_data_ptr, Addr addr);
   int getSubblockWBCount(int index);
+  int getSubblockSequence(int set, int way);
+
+  CachePredictor *m_cache_predictor;
 
   // Functions for locking and unlocking cache lines corresponding to the
   // provided address.  These are required for supporting atomic memory
