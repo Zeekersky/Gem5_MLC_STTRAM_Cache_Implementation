@@ -130,6 +130,9 @@ MakeInclude('common/WriteMask.hh')
 MakeInclude('filters/AbstractBloomFilter.hh')
 MakeInclude('network/MessageBuffer.hh')
 MakeInclude('structures/CacheMemory.hh')
+# By AP
+MakeInclude('structures/CachePredictor.hh')
+
 MakeInclude('structures/DirectoryMemory.hh')
 MakeInclude('structures/PerfectCacheMemory.hh')
 MakeInclude('structures/PersistentTable.hh')

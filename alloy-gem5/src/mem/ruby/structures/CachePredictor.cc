@@ -2,71 +2,39 @@
  * Author: Akash Pal (AP)
  */
 
+#include <vector>
 #include "mem/ruby/structures/CachePredictor.hh"
 using namespace std;
 
-CachePredictor::CachePredictor() {}
-
-CachePredictor::~CachePredictor() {}
-
-uint64_t CachePredictor::makeKey(Addr pcAddress, Addr cacheBlockAddress) const
+// get the index of predictorTable
+int CachePredictor::getTableIndex(Addr pcAddress, Addr cacheBlockAddress)
 {
-    return ((~0x3F) & pcAddress) | (cacheBlockAddress & 0x3F);
+    cout << "Getting table index..." << endl;
+
+    PredictorKey key(pcAddress, cacheBlockAddress);
+    cout << "Key: " << key.pcAddress << ", " << key.cacheBlockAddress << endl;
+    // Use mid square hashing to get the index
+    std::size_t keyVal = std::hash<Addr>()((key.pcAddress << 6) | (key.cacheBlockAddress & 0x3F));
+    std::size_t hashVal = keyVal * keyVal;
+    int index = (hashVal >> 22) & 0x1FF;
+    std::cout << "Index: " << index % 512 << endl;
+    return index % 512;
 }
 
 // Adds a new entry to the predictor table
 void CachePredictor::addEntry(Addr pcAddress, Addr cacheBlockAddress, int index_sequence)
 {
-    PredictorKey key(pcAddress, cacheBlockAddress);
-    // // uint64_t key = makeKey(pcAddress, cacheBlockAddress);
-    // if (!lookupEntry(pcAddress, cacheBlockAddress) || predictorTable[key] != index_sequence)
-    // {
-    //     predictorTable.insert({key, index_sequence});
-    // }
-    cout << "PCAddress: " << key.pcAddress
-         << " CacheBlSockAddress: " << key.cacheBlockAddress
-         << " Sequence: " << index_sequence << endl;
-}
-
-// Checks if an entry exists for a given PC and cache block address
-bool CachePredictor::lookupEntry(Addr pcAddress, Addr cacheBlockAddress) const
-{
-    PredictorKey key(pcAddress, cacheBlockAddress);
-    // uint64_t key = makeKey(pcAddress, cacheBlockAddress);
-    return predictorTable.find(key) != predictorTable.end();
-}
-
-// Prints the content by the key of the predictor table
-// void CachePredictor::printByKey(PredictorKey key, ostream &out) const
-// {
-//     PredictorKey
-//     auto it = predictorTable.find(key);
-//     if (it != predictorTable.end())
-//     {
-//         out << "Key: " << key
-//             << ", PC Address: " << (((~0x3F) & key) >> 6)
-//             << ", Cache Block Address: " << (key & 0x3F)
-//             << ", Sequence: " << it->second << endl;
-//     }
-//     else
-//         out << "Key not found..." << endl;
-// }
-
-// Prints the contents of the predictor table
-void CachePredictor::print(ostream &out) const
-{
-    for (const auto &entry : predictorTable)
-    {
-        const auto &key = entry.first;
-        // out << "Key: " << entry.first
-        //     << ", Sequence: " << entry.second << endl;
-
-        // out << "PC Address: " << (((~0x3F) & key) >> 6)
-        //     << ", Cache Block Address: " << (key & 0x3F)
-        //     << ", Sequence: " << entry.second << endl;
-
-        out << "PC Address: " << key.pcAddress
-            << ", Cache Block Address: " << key.cacheBlockAddress
-            << ", Sequence: " << entry.second << endl;
-    }
+    int index = getTableIndex(pcAddress, cacheBlockAddress);
+    cout << "Index: " << index << endl;
+    cout << "Size: " << predictorTable.size() << endl;
+    cout << "Index Sequence: " << predictorTable[0].second << endl;
+    if (index < predictorTable.size())
+        predictorTable[index] = pair<PredictorKey, int>(PredictorKey(pcAddress, cacheBlockAddress), index_sequence);
+    else
+        cout << "Index out of range..." << endl;
+    cout << "Index: " << index
+         << " PC Address: " << predictorTable[index].first.pcAddress
+         << " Cache Block Address: " << predictorTable[index].first.cacheBlockAddress
+         << " Sequence: " << predictorTable[index].second
+         << endl;
 }

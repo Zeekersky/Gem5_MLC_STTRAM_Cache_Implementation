@@ -564,6 +564,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.Prefetch := in_msg.Prefetch;
         out_msg.AccessMode := in_msg.AccessMode;
+        out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
       }
     }
   }
@@ -581,6 +582,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.Prefetch := in_msg.Prefetch;
         out_msg.AccessMode := in_msg.AccessMode;
+        out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
       }
     }
   }
@@ -598,6 +600,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.Prefetch := in_msg.Prefetch;
         out_msg.AccessMode := in_msg.AccessMode;
+        out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
       }
     }
   }
@@ -615,6 +618,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
               out_msg.MessageSize := MessageSizeType:Control;
               out_msg.Prefetch := in_msg.Prefetch;
               out_msg.AccessMode := in_msg.AccessMode;
+              out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
 
               DPRINTF(RubySlicc, "address: %#x, destination: %s\n",
                       address, out_msg.Destination);
@@ -636,6 +640,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.Prefetch := in_msg.Prefetch;
         out_msg.AccessMode := in_msg.AccessMode;
+        out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
       }
     }
   }
@@ -656,6 +661,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
               out_msg.MessageSize := MessageSizeType:Control;
               out_msg.Prefetch := in_msg.Prefetch;
               out_msg.AccessMode := in_msg.AccessMode;
+              out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
           }
       }
   }
@@ -673,6 +679,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
         out_msg.MessageSize := MessageSizeType:Control;
         out_msg.Prefetch := in_msg.Prefetch;
         out_msg.AccessMode := in_msg.AccessMode;
+        out_msg.ProgramCounter := in_msg.ProgramCounter; // By AP
       }
     }
   }

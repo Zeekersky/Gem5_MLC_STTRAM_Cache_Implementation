@@ -629,7 +629,6 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
       assert(is_valid(cache_entry));
 
       // By AP
-      // L2cache.checkSubBlockWB(in_msg.DataBlk, cache_entry);
       L2cache.checkSubBlockWB_addr(in_msg.DataBlk, cache_entry.DataBlk, address);
       ++L2cache.write_Count;
       cache_entry.DataBlk := in_msg.DataBlk;

@@ -319,6 +319,12 @@ structure (CacheMemory, external = "yes") {
   Addr popNextLine();
 }
 
+// By AP
+structure (CachePredictor, external = "yes"){
+  int getTableIndex(Addr, Addr);
+  void addEntry(Addr, Addr, int);
+}
+
 structure (WireBuffer, inport="yes", outport="yes", external = "yes") {
 
 }

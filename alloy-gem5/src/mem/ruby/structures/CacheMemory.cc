@@ -26,9 +26,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include "mem/ruby/structures/CacheMemory.hh"
-
 #include "base/intmath.hh"
 #include "base/logging.hh"
 #include "debug/RubyCache.hh"
@@ -38,6 +35,8 @@
 #include "mem/protocol/AccessPermission.hh"
 #include "mem/ruby/system/RubySystem.hh"
 #include "mem/ruby/system/WeightedLRUPolicy.hh"
+
+#include "mem/ruby/structures/CacheMemory.hh"
 
 using namespace std;
 
@@ -201,7 +200,9 @@ void CacheMemory::checkSubBlockWB_addr(DataBlock new_data_ptr, DataBlock old_dat
     }
     int subblock_sequence = getSubblockSequence(set, way);
     cout << "Subblock Sequence: " << subblock_sequence << endl;
-    m_cache_predictor->addEntry(addr, addr, subblock_sequence);
+    cout << sizeof(addr) << endl;
+    m_cache_predictor.addEntry(addr, addr, subblock_sequence);
+    // m_cache_predictor->lookupEntry(addr, addr);
     // uint64_t m_key = m_cache_predictor->makeKey(addr, addr);
     // m_cache_predictor->printByKey(m_key, cout);
 }
